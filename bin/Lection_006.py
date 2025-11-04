@@ -3,6 +3,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from scipy.stats import linregress
 
 
 # Создадим базовый класс от которого потом будем делать два или более дочерних
@@ -303,8 +305,14 @@ class Mech_properties (Data_xy):
     
     """класс для расчета механических свойств"""
     
-    def __init__(self, x_data, y_data, data_name='Default data'):
+    def __init__(self, x_data, y_data, stress_type = 'eng', data_name='Default data'):
         super().__init__(x_data, y_data, data_name)
+        
+        if stress_type in ['eng', 'true']:
+            self.stress_type = stress_type
+        else:
+            print ('Атрибут stress_type может быть только eng либо true. Было принято дефолтное значение eng')
+            self.stress_type = 'eng'
 
         ### Переменные для хранения механических характеристик
         self.Rm, self.Ag, self.E, self.yield_stress = None, None, None, None
@@ -321,25 +329,32 @@ class Mech_properties (Data_xy):
         return self.y_data
 
 
-    def get_E (self, elastic_limit = 0.05):
+    def get_E (self, strain_limit_left = 0, strain_limit_right = 0.05):
         '''
         Функция пытается расчитать модуль Юнга. Если вдруг инженерные напряжения и деформации не были расчитаны, то функция
         выкидывает ошибку
         '''
+        
+        strain = self.strain
+        stress = self.stress
+              
+        
         try:
-            filtr = self.strain_eng <= elastic_limit
-            stress_elastic = self.stress_eng[filtr]
-            strain_elastic = self.strain_eng[filtr]
-
-            strain_elastic = strain_elastic/100 # переходим от процентов к долям от единицы
+            filtr = (strain <= strain_limit_right)&(strain >= strain_limit_left)
+            stress_elastic = stress[filtr]
+            strain_elastic = strain[filtr]
             
-            numerator = np.sum(stress_elastic * strain_elastic)
-            denominator = np.sum(strain_elastic ** 2)
-            self.E = numerator / denominator
+
+            if self.stress_type == 'eng':
+                strain_elastic = strain_elastic/100 # переходим от процентов к долям от единицы
+              
+            self.E = (stress_elastic[-1] - stress_elastic[0])/(strain_elastic[-1] - strain_elastic[0])
+            
             return self.E
+        
         except Exception:
             print (f'Ошибка {Exception}')
-            print ('Судя по всему инженерные деформация и напряжения не расчитаны или расчитаны неправильно.')
+            print ('Судя по всему деформация и напряжения не расчитаны или расчитаны неправильно.')
             raise
     
 
@@ -380,11 +395,19 @@ class Mech_properties (Data_xy):
         '''
         Функция расчитывает предел текучести
         '''
+        
+        strain = self.strain
+        stress = self.stress
+        
         if not self.E:
             _ = self.get_E()
+            
+        if self.stress_type == 'eng':
+            strain = strain/100 # переходим от процентов к долям от единицы
 
-        filtr = self.strain_eng/100 - self.stress_eng/self.E >= strain_limit/100
-        self.yeild_stress = self.stress_eng[filtr][0]
+        
+        filtr = strain - stress/self.E >= strain_limit
+        self.yeild_stress = stress[filtr][0]
         return self.yeild_stress
         
 
@@ -402,6 +425,7 @@ class Mech_properties (Data_xy):
                 'Равномерное удлинение': self.Ag}
 
 
+#%%
 if __name__ == "__main__":
     # считываем данные
     brass_array = np.loadtxt ('../dz/dz001/Fairuzova/brass.csv', delimiter=',', encoding='utf-8-sig')
@@ -427,15 +451,25 @@ if __name__ == "__main__":
                                  'Истинная деформация', 
                                  'Истинное напряжение, МПа')
     
+    
+    stifnesses = {'brass test': brass_stress_strain.k}
+    
+    
+    
 #%%    
-    steel_array = np.loadtxt('../data/load_stroke_data.txt', delimiter='\t', encoding='utf-8-sig')
+    steel_array = np.loadtxt('../dz/dz001/Fairuzova/3_20.csv', delimiter=',', encoding='utf-8-sig')
     # Исходные размеры образца
-    steel_data = {'Le': 80 + steel_array[-1, 0], 'a0': 1.5, 'b0':20, 'L0': 80 }
+    steel_data = {'Le': 4.14,  'd0':9.20, 'L0': 14.9 }
 
-    A0 = steel_data['a0']*steel_data['b0']
+    A0 = (np.pi*steel_data['d0']**2)/4
 
     steel_stress_strain = Stress_strain (steel_array[:,0], steel_array[:,1], 
                                    steel_data['L0'], A0, Le=steel_data['Le'])
+    
+    # посчитаем жесткость
+    _ = steel_stress_strain.get_stifness()
+    stifnesses['steel test'] = steel_stress_strain.k
+    
     
     #_ = steel_stress_strain.get_stifness()
     #_ = steel_stress_strain.get_strain_eng()
@@ -454,15 +488,26 @@ if __name__ == "__main__":
     # выделим кривую упрочнения
     flow_stress = Stress_strain.get_flow_curve(steel_stress_strain.strain_true, 
                                                steel_stress_strain.stress_true, 
-                                               200., 0.3)
+                                               420., 1.2)
     
     # посмотрим на нее
     steel_stress_strain.plot_graph(flow_stress[:, 0], flow_stress[:, 1], 
                                  'Истинная деформация', 
                                  'Истинное напряжение, МПа')
+    
+    
+    # Создадим объект для расчета мех. характиристик (модуля Юнга и предела текучести)
+    mech_properties = Mech_properties (steel_stress_strain.strain_true, steel_stress_strain.stress_true, 
+                                       stress_type = 'true')
+    
+    # Посмотрим внимательнее на "около" упругую часть графика
+    filtr01 = mech_properties.strain <= 0.1
+    steel_stress_strain.plot_graph(steel_stress_strain.strain_true[filtr01], steel_stress_strain.stress_true[filtr01], 'Истинная деформация', 'Истинное напряжение, Н')
+    _ = mech_properties.get_E(strain_limit_left = 0.017, strain_limit_right = 0.022)
+    
+    print (f'Модуль Юнга равен: {mech_properties.E:.2f} МПа')
+    
 
-    
-    
     
     
     
