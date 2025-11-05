@@ -193,7 +193,7 @@ class Stress_strain (Data_xy):
                 elastic_machine_displasement = self.stroke[-1] - delta_L
                 # Рассчитываем жеткость машины
                 self.k = self.load[-1]/elastic_machine_displasement
-                return self.k       
+                return self.k, elastic_machine_displasement     
             else:
                 raise ValueError ("Неподдерживаемый тип данных для переменной self.Le (конечная длина образц)")
 
