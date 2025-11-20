@@ -181,10 +181,11 @@ class FisherTable:
         """
         self.n_samples, self.n_repeats, self.coefs  = n_samples, n_repeats, coefs
         
-        self.f2 = int(self.n_repeats - 1)
+        self.f2 = int(self.n_repeats - 1) # степень сводобы знаменателя
+       
         n_non_zero_coefs = np.count_nonzero(self.coefs)
         
-        self.f1 = int(self.n_samples - n_non_zero_coefs) 
+        self.f1 = int(self.n_samples - n_non_zero_coefs) # степени свободы числителя 
         
         
         if self.f1 not in self.f1_values:
@@ -296,7 +297,7 @@ class Regression:
         Метод для расчета коэффициентов линейной регрессии
         '''
         
-        # Оставляйте как есть - это стандартный подход для DOE
+        # добавляем столбец с единицами
         X = np.column_stack([np.ones(self.n_samples), self.matrix_normalized])
         y = self.target_values_avg
         
@@ -328,7 +329,50 @@ class Regression:
                 self.coefs[i] = 0.0
             else:
                 pass
- 
+            
+    def check_model (self):
+        '''
+        Проверка адекватности модели по критерию Фишера
+        '''
+        
+        required_attrs = ['coefs', 'S2_vospr', 'n_samples', 'student_max', 'student']
+        # Проверяем все необходимые атрибуты
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            raise ValueError("Не все необходимые атрибуты рассчитаны.")
+            
+        # расчитаем табличный критерий Фишера
+        fisher = FisherTable()
+        self.fisher_max = fisher.get_value(self.n_samples, self.n_repeats, self.coefs)
+        
+        # добавляем столбец с единицами
+        X = np.column_stack([np.ones(self.n_samples), self.matrix_normalized])
+        y = self.target_values_avg
+        
+        
+        # расчетные значения целевой функции
+        self.target_values_model = X @ self.coefs
+        y_mod = self.target_values_model
+        
+        # расчет разницы между моделью и экспериметном
+        residuals = y - y_mod
+        
+        # остаточная сумма квадратов
+        self.SS_ost = round(float(np.sum(residuals**2)), 3)
+        
+        # Число степеней свободы остатков
+        f_ost = fisher.f1
+        
+        # Дисперсия адекватности
+        self.S2_adeq = self.SS_ost / f_ost
+        
+        # Расчетный критерий Фишера
+        self.fisher = round(float(self.S2_adeq / self.S2_vospr),3)
+        
+        return self.fisher 
+            
+            
+        
+        
 
 
 
@@ -368,6 +412,9 @@ if __name__ == '__main__':
     _ = regression.get_coefficients()
     
     _ = regression.check_coefficients()
+    
+    
+    _ = regression.check_model()
     
     
     fisher = FisherTable()
